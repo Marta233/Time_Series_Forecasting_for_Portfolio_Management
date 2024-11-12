@@ -20,6 +20,7 @@ class TimeSeriesProcessor:
         self.model_fit = None
         self.differenced_data = None
         self.lstm_model = None
+        self.scaler = MinMaxScaler()
 
     def load_and_prepare_data(self):
         self.data = pd.read_csv(self.file_path)
@@ -104,65 +105,26 @@ class TimeSeriesProcessor:
         else:
             raise ValueError("No suitable SARIMA model found.")
 
-    def fit_lstm(self, data, n_steps, epochs=200):
-        X, y = [], []
-        for i in range(len(data) - n_steps):
-            X.append(data[i:i + n_steps])
-            y.append(data[i + n_steps])
-        X, y = np.array(X), np.array(y)
-
-        X = X.reshape((X.shape[0], X.shape[1], 1))
-
-        self.lstm_model = Sequential()
-        self.lstm_model.add(LSTM(50, activation='relu', input_shape=(n_steps, 1)))
-        self.lstm_model.add(Dense(1))
-        self.lstm_model.compile(optimizer='adam', loss='mse')
-
-        self.lstm_model.fit(X, y, epochs=epochs, verbose=0)
-
-    def predict_lstm(self, data, n_steps):
-        if self.lstm_model is None:
-            raise ValueError("LSTM model has not been trained. Call the 'fit_lstm' method first.")
-
-        predictions = []
-        input_data = data[-n_steps:].tolist()
-
-        for _ in range(len(data)):
-            input_array = np.array(input_data[-n_steps:]).reshape((1, n_steps, 1))  # Reshape to (1, n_steps, 1)
-            prediction = self.lstm_model.predict(input_array, verbose=0)[0][0]
-            predictions.append(prediction)
-            input_data.append(prediction)
-
-        return predictions
-
     def forecast(self, steps=30):
         if self.model_fit is None:
             raise ValueError("Model is not fitted. Call fit_model() first.")
         
         forecast = self.model_fit.forecast(steps=steps)
         return forecast
-    
-    def evaluate_model(self, test_data, model_name):
+
+    def evaluate_arima_sarima(self, test_data):
         if self.model_fit is None:
-            raise ValueError("Model is not fitted. Call fit_model() first.")
+            raise ValueError("Model is not fitted. Fit the ARIMA/SARIMA model first.")
 
         steps = len(test_data)
         forecast = self.forecast(steps=steps)
 
-        # Ensure no NaN values in test and forecast data
-        test_data = test_data.dropna()
-        forecast = pd.Series(forecast).dropna()
-
-        # Adjust lengths if necessary
-        min_length = min(len(test_data), len(forecast))
-        test_data = test_data[:min_length]
-        forecast = forecast[:min_length]
-
         mae = mean_absolute_error(test_data, forecast)
         rmse = np.sqrt(mean_squared_error(test_data, forecast))
-        print(f"{model_name} - Mean Absolute Error (MAE): {mae}")
-        print(f"{model_name} - Root Mean Squared Error (RMSE): {rmse}")
-        return mae, rmse
+        print(f"ARIMA/SARIMA - Mean Absolute Error (MAE): {mae}")
+        print(f"ARIMA/SARIMA - Root Mean Squared Error (RMSE): {rmse}")
+
+        return forecast
 
     def plot_results(self, train_data, test_data, forecast, model_name):
         plt.figure(figsize=(12, 6))
@@ -174,3 +136,55 @@ class TimeSeriesProcessor:
         plt.ylabel(self.target_column)
         plt.legend()
         plt.show()
+
+    def fit_lstm(self, train_data, n_steps=60, epochs=10, batch_size=32):
+        # Scale training data
+        train_scaled = self.scaler.fit_transform(np.array(train_data).reshape(-1, 1))
+
+        # Prepare data for LSTM training
+        X_train, y_train = [], []
+        for i in range(n_steps, len(train_scaled)):
+            X_train.append(train_scaled[i-n_steps:i])
+            y_train.append(train_scaled[i])
+        
+        X_train, y_train = np.array(X_train), np.array(y_train)
+
+        # Define LSTM model architecture
+        self.lstm_model = Sequential([
+            LSTM(50, return_sequences=True, input_shape=(X_train.shape[1], 1)),
+            LSTM(50),
+            Dense(1)
+        ])
+
+        # Compile and train the LSTM model
+        self.lstm_model.compile(optimizer='adam', loss='mean_squared_error')
+        self.lstm_model.fit(X_train, y_train, epochs=epochs, batch_size=batch_size)
+
+    def predict_lstm(self, train_data, test_data, n_steps=60):
+        # Prepare inputs for predictions
+        inputs = self.scaler.transform(np.array(train_data[-n_steps:].tolist() + test_data.tolist()).reshape(-1, 1))
+        X_test = []
+        for i in range(n_steps, len(inputs)):
+            X_test.append(inputs[i-n_steps:i])
+        X_test = np.array(X_test)
+
+        # Make predictions using the trained model
+        lstm_forecast = self.lstm_model.predict(X_test)
+        lstm_forecast = self.scaler.inverse_transform(lstm_forecast)  # Rescale predictions to original scale
+
+        # Align the forecast with the test data
+        return lstm_forecast[-len(test_data):]
+
+    def evaluate_lstm(self, train_data, test_data):
+        if self.lstm_model is None:
+            raise ValueError("LSTM model is not fitted. Fit the LSTM model first.")
+
+        lstm_forecast = self.predict_lstm(train_data, test_data)
+        
+        mae = mean_absolute_error(test_data, lstm_forecast)
+        rmse = np.sqrt(mean_squared_error(test_data, lstm_forecast))
+        print(f"LSTM - Mean Absolute Error (MAE): {mae}")
+        print(f"LSTM - Root Mean Squared Error (RMSE): {rmse}")
+
+        return lstm_forecast
+
