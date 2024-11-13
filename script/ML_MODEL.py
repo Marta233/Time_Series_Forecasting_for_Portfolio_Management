@@ -188,20 +188,4 @@ class TimeSeriesProcessor:
 
         return lstm_forecast
     
-        # Trend Analysis
-    def analyze_trend(forecast_series):
-        trend = "upward" if forecast_series.iloc[-1] > forecast_series.iloc[0] else "downward" if forecast_series.iloc[-1] < forecast_series.iloc[0] else "stable"
-        print(f"Trend Analysis: The forecast shows a {trend} trend.")
-
-    # Volatility and Risk
-    def analyze_volatility(forecast_series):
-        volatility = forecast_series.pct_change().std()
-        print(f"Expected Volatility: {volatility:.2f}")
-
-    # Market Opportunities and Risks
-    def analyze_market_opportunities(forecast_series):
-        if forecast_series.iloc[-1] > forecast_series.iloc[0]:
-            print("Market Opportunity: Potential for price increases.")
-        else:
-            print("Market Risk: Potential for price declines.")
-
+    
